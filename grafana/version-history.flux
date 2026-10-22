@@ -1,0 +1,5 @@
+from(bucket: "jamf_inventory")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "jamf_os_distribution" and r._field == "count" and r.platform == "macOS")
+  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)
+  |> yield(name: "count")

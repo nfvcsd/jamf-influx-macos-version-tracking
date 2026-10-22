@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect Jamf mobile OS inventory hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=60
+Unit=jamf-mobile-influx.service
+
+[Install]
+WantedBy=timers.target

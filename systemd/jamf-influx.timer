@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect Jamf macOS inventory hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=60
+Unit=jamf-influx.service
+
+[Install]
+WantedBy=timers.target

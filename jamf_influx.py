@@ -25,7 +25,7 @@ JAMF_CLIENT_ID = os.environ.get("JAMF_CLIENT_ID")
 JAMF_CLIENT_SECRET = os.environ.get("JAMF_CLIENT_SECRET")
 JAMF_ENVIRONMENT_ID = os.environ.get("JAMF_ENVIRONMENT_ID")
 
-JAMF_PAGE_SIZE = int(os.environ.get("JAMF_PAGE_SIZE", "500"))
+JAMF_PAGE_SIZE = os.environ.get("JAMF_PAGE_SIZE", "500")
 
 INFLUX_URL = os.environ.get("INFLUX_URL")
 INFLUX_ORG = os.environ.get("INFLUX_ORG")
@@ -43,6 +43,14 @@ STATE_FILE = Path(
 
 
 def validate_environment(dry_run=False):
+    global JAMF_PAGE_SIZE
+    try:
+        JAMF_PAGE_SIZE = int(JAMF_PAGE_SIZE)
+        if JAMF_PAGE_SIZE <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise RuntimeError("JAMF_PAGE_SIZE must be a positive integer.") from None
+
     required = {
         "JAMF_CLIENT_ID": JAMF_CLIENT_ID,
         "JAMF_CLIENT_SECRET": JAMF_CLIENT_SECRET,
@@ -180,8 +188,7 @@ def get_jamf_token():
     if not response.ok:
         raise RuntimeError(
             f"Jamf authentication failed: "
-            f"HTTP {response.status_code}: "
-            f"{response.text[:500]}"
+            f"HTTP {response.status_code}"
         )
 
     payload = response.json()
@@ -247,11 +254,13 @@ def get_inventory_page(token, page):
         raise RuntimeError(
             f"Jamf inventory request failed "
             f"on page {page}: "
-            f"HTTP {response.status_code}: "
-            f"{response.text[:1000]}"
+            f"HTTP {response.status_code}"
         )
 
-    return response.json(), token
+    payload = response.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        raise RuntimeError("Jamf returned an invalid inventory response.")
+    return payload, token
 
 
 def collect_os_versions():
@@ -268,13 +277,23 @@ def collect_os_versions():
 
     page = 0
     total_computers = 0
+    expected_total = None
 
     while True:
         data, token = get_inventory_page(token, page)
 
-        results = data.get("results", [])
+        results = data["results"]
+        page_total = data.get("totalCount")
+        if page_total is not None:
+            if type(page_total) is not int or page_total < 0:
+                raise RuntimeError("Jamf returned an invalid totalCount.")
+            if expected_total is not None and page_total != expected_total:
+                raise RuntimeError("Jamf inventory changed during collection; retry next run.")
+            expected_total = page_total
 
         if not results:
+            if expected_total is not None and total_computers != expected_total:
+                raise RuntimeError("Jamf returned an incomplete inventory; refusing to write.")
             break
 
         for computer in results:
@@ -286,6 +305,14 @@ def collect_os_versions():
             total_computers += 1
 
         print(f"Retrieved Jamf page {page}: " f"{len(results)} computers")
+
+        if expected_total is not None:
+            if total_computers > expected_total:
+                raise RuntimeError("Jamf inventory exceeded totalCount; refusing to write.")
+            if total_computers == expected_total:
+                break
+            page += 1
+            continue
 
         # If Jamf returned fewer records than our page size,
         # this was the final page.
@@ -320,17 +347,18 @@ def load_known_versions():
         with STATE_FILE.open("r", encoding="utf-8") as file:
             data = json.load(file)
 
-        versions = data.get("versions", [])
-
+        if not isinstance(data, dict) or not isinstance(data.get("versions"), list):
+            raise ValueError
+        versions = data["versions"]
+        if not all(isinstance(version, str) for version in versions):
+            raise ValueError
         return {normalize_version(version) for version in versions}
 
-    except Exception as exc:
-        print(
-            f"WARNING: Could not load state file: " f"{exc}",
-            file=sys.stderr,
-        )
+    except (OSError, ValueError, TypeError):
+        raise RuntimeError(
+            "Cannot read known_versions state. Restore or repair it before writing."
+        ) from None
 
-        return set()
 
 
 def save_known_versions(versions):
@@ -540,7 +568,7 @@ if __name__ == "__main__":
 
     except Exception as exc:
         print(
-            f"ERROR: {exc}",
+            f"ERROR: {exc if isinstance(exc, RuntimeError) else type(exc).__name__}",
             file=sys.stderr,
         )
 

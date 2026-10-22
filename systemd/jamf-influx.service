@@ -1,0 +1,21 @@
+[Unit]
+Description=Collect Jamf macOS version counts into InfluxDB
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=jamfinflux
+Group=jamfinflux
+WorkingDirectory=/opt/jamf-influx
+EnvironmentFile=/etc/jamf-influx.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/jamf-influx/venv/bin/python /opt/jamf-influx/jamf_influx.py
+StateDirectory=jamf-influx
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+TimeoutStartSec=30min

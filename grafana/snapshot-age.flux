@@ -1,0 +1,5 @@
+from(bucket: "jamf_inventory")
+  |> range(start: -30d)
+  |> filter(fn: (r) => r._measurement == "jamf_inventory_summary" and r._field == "total_devices" and r.platform == "macOS")
+  |> last()
+  |> map(fn: (r) => ({r with _value: float(v: int(v: now()) - int(v: r._time)) / 1000000000.0}))

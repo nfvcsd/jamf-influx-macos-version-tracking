@@ -1,0 +1,21 @@
+[Unit]
+Description=Collect Jamf mobile OS version counts into InfluxDB
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=jamfinflux
+Group=jamfinflux
+WorkingDirectory=/opt/jamf-mobile-influx
+EnvironmentFile=/etc/jamf-mobile-influx.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/jamf-mobile-influx/venv/bin/python /opt/jamf-mobile-influx/jamf_mobile_influx.py
+StateDirectory=jamf-mobile-influx
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+TimeoutStartSec=30min
