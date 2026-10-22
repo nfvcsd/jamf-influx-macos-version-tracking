@@ -1,46 +1,89 @@
-# Jamf → InfluxDB macOS version tracking
+# Jamf OS Version Tracking for InfluxDB
 
-Collect aggregate macOS version counts from the Jamf Platform API and write hourly snapshots to InfluxDB 2.x. Grafana displays the fleet distribution and its history using Flux.
+Track macOS and mobile-device OS versions from the Jamf Platform API in InfluxDB, and visualize fleet trends in Grafana.
 
-The collector requests `OPERATING_SYSTEM` inventory, counts versions locally, and retains only version totals. It does not store device names, serial numbers, or inventory records.
+Two independent Python collectors aggregate inventory by OS version. Each has its own configuration, state file, installer, and hourly systemd timer. Run either collector on its own or both together.
 
-## Project files
+## Features
 
-| File | Purpose |
-| --- | --- |
-| `jamf_influx.py` | OAuth authentication, pagination, normalization, snapshot writes and state |
-| `jamf-influx.env.example` | Credential-free configuration template |
-| `requirements.txt` | Python runtime dependencies |
-| `setup.sh` | Debian/Ubuntu installation; leaves activation to the operator |
-| `systemd/` | Oneshot service and hourly timer |
-| `docs/deployment.md` | Prerequisites, values, paths, installation and operations |
-| `docs/data-model.md` | Normalization, measurements, state and failure behavior |
-| `grafana/` | Copyable Flux queries and panel guidance |
-| `tests/` | Offline regression tests with mocked services |
+- Paginated inventory collection with OAuth client credentials and token refresh.
+- Version normalization: `15.4.0` becomes `15.4`, while `27.0` stays `27.0`.
+- Aggregate snapshots with device counts, active versions, and unknown versions.
+- Persistent version tracking that writes zero counts when a version disappears.
+- A `--dry-run` option to check inventory without writing InfluxDB or state.
+- Separate Mac and mobile measurements, plus ready-to-use Grafana Flux queries.
 
-## Start here
+Only aggregate counts and version state are stored. Device names, serial numbers, and individual inventory records are not retained.
 
-Read [the deployment guide](docs/deployment.md), create a Jamf Platform integration and an InfluxDB bucket/token, then run `sudo bash setup.sh` on your Linux server. Configure `/etc/jamf-influx.env`, run the documented dry run, and enable the timer after the first successful write.
+## Requirements
 
-For local development (Python 3.10+):
+- Python 3.10 or newer.
+- A Jamf Platform integration scoped to the target environment, with read access to the relevant computer or mobile-device inventory.
+- InfluxDB 2.x with an organization, bucket, and bucket-write token.
+- Debian or Ubuntu with systemd for the supplied installers and scheduled services.
+- A Flux-capable Grafana data source for the included dashboard queries.
+
+## Choose a collector
+
+| | macOS | Mobile devices |
+| --- | --- | --- |
+| Script | `jamf_influx.py` | `jamf_mobile_influx.py` |
+| Installer | `setup.sh` | `setup-mobile.sh` |
+| Configuration template | `jamf-influx.env.example` | `jamf-mobile-influx.env.example` |
+| Installed configuration | `/etc/jamf-influx.env` | `/etc/jamf-mobile-influx.env` |
+| Service | `jamf-influx.service` | `jamf-mobile-influx.service` |
+| Timer | `jamf-influx.timer` | `jamf-mobile-influx.timer` |
+| Setup guide | [macOS deployment](docs/deployment.md) | [Mobile deployment](docs/mobile-devices.md) |
+
+Mobile counts combine all returned mobile-device OS versions; they do not separate iOS, iPadOS, and other mobile OS families. Both collectors report Jamf's recorded inventory rather than probing devices live.
+
+## Getting started
+
+1. Create the Jamf integration and InfluxDB bucket and token.
+2. Follow the relevant setup guide above and run its installer on your Linux server.
+3. Edit the installed configuration file with your environment's values.
+4. Run the documented dry run and compare the counts with Jamf.
+5. Perform the first write, then enable the collector's timer.
+
+Installers preserve existing configuration and state and do not enable collection automatically. The scripts read process environment variables; they do not load env files themselves. The systemd services load the installed configuration files.
+
+The Mac and mobile collectors for one Jamf environment can share an InfluxDB bucket because their measurement names differ. Use separate buckets for independent Jamf environments: the schema has no environment tag. Keep each collector's state file separate.
+
+## Grafana and data model
+
+- [Grafana panel setup and Flux examples](grafana/README.md)
+- [Mobile Flux queries](grafana/mobile/)
+- [Normalization, measurements, and state behavior](docs/data-model.md)
+- [Mobile schema and operations](docs/mobile-devices.md)
+
+Current-distribution queries select one snapshot timestamp to avoid including stale version labels. History queries show changes over time, and freshness queries help identify missed collection runs. The examples require Flux; they are not InfluxDB 3 SQL queries.
+
+## Development
+
+Create a virtual environment and install runtime and development dependencies:
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python jamf_influx.py --help
+.venv/bin/python -m pip install -r requirements-dev.txt
 ```
 
-The script reads process environment variables; it does not automatically load an env file. `--dry-run` still authenticates to Jamf and reads inventory, but does not write InfluxDB or state. Tests use no real credentials or network services.
+Run the offline tests and formatting check:
 
-## Handoff provenance and scope
+```sh
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m black --check --diff .
+```
 
-This repository already contained the normalized collector from the “Track Jamf OS Versions” conversation. The handoff preserves its Platform API endpoints, environment header, measurement names, and state format. Deployment and documentation were reconstructed from that implementation and the available chat context; the earlier downloadable Word/Markdown attachments were not available to copy.
+Apply formatting before submitting changes:
 
-One installation represents one Jamf environment per bucket. There is no tenant/environment tag: do not send multiple independent fleets into the same bucket with this schema. The Grafana examples require a Flux-capable InfluxDB backend; they are not InfluxDB 3 SQL examples. OptiSigns/JWT embedding setup is separate from collection and is not enabled by this installer.
+```sh
+.venv/bin/python -m black .
+```
 
-Real env files and runtime state are ignored. Never commit credentials. If a real credential was committed in earlier history, ignoring or deleting its file does not remove it from history: rotate it and coordinate history cleanup separately.
+Black is pinned in `requirements-dev.txt` so local and CI formatting agree. GitHub Actions runs the test suite on Python 3.10–3.15 and checks Black formatting on every push and pull request. Tests mock Jamf and InfluxDB; no service credentials are required. The workflow also checks installer shell syntax. Live API access and systemd deployment should be verified separately on the target server.
 
-## Mobile devices
+## Credentials and operations
 
-A separate `jamf_mobile_influx.py` collector is available with `setup-mobile.sh`, `jamf-mobile-influx.env.example`, and its own systemd service/timer. It follows the same run pattern while keeping mobile measurements and state separate. See [mobile setup and operations](docs/mobile-devices.md). The Mac and mobile collectors for one environment can share a bucket; independent environments still need separate buckets.
+Keep real credentials in the protected installed configuration files, not in source control. Use a separate read-only InfluxDB token for Grafana. Local env files and runtime state are ignored by Git; only placeholder templates belong in the repository.
+
+See the deployment guides for permissions, logs, manual runs, credential rotation, state recovery, and troubleshooting. If a credential is accidentally committed, rotate it; deleting the file does not remove it from Git history.

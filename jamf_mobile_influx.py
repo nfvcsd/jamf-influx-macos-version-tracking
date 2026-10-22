@@ -187,8 +187,7 @@ def get_jamf_token():
 
     if not response.ok:
         raise RuntimeError(
-            f"Jamf authentication failed: "
-            f"HTTP {response.status_code}"
+            f"Jamf authentication failed: " f"HTTP {response.status_code}"
         )
 
     payload = response.json()
@@ -289,12 +288,16 @@ def collect_os_versions():
             if type(page_total) is not int or page_total < 0:
                 raise RuntimeError("Jamf returned an invalid totalCount.")
             if expected_total is not None and page_total != expected_total:
-                raise RuntimeError("Jamf inventory changed during collection; retry next run.")
+                raise RuntimeError(
+                    "Jamf inventory changed during collection; retry next run."
+                )
             expected_total = page_total
 
         if not results:
             if expected_total is not None and total_devices != expected_total:
-                raise RuntimeError("Jamf returned an incomplete inventory; refusing to write.")
+                raise RuntimeError(
+                    "Jamf returned an incomplete inventory; refusing to write."
+                )
             break
 
         for device in results:
@@ -309,7 +312,9 @@ def collect_os_versions():
 
         if expected_total is not None:
             if total_devices > expected_total:
-                raise RuntimeError("Jamf inventory exceeded totalCount; refusing to write.")
+                raise RuntimeError(
+                    "Jamf inventory exceeded totalCount; refusing to write."
+                )
             if total_devices == expected_total:
                 break
             page += 1
@@ -359,7 +364,6 @@ def load_known_versions():
         raise RuntimeError(
             "Cannot read known_versions state. Restore or repair it before writing."
         ) from None
-
 
 
 def save_known_versions(versions):
